@@ -6,6 +6,7 @@ load_dotenv()
 sol_wallet_address = os.environ.get('SOL_WALLET_ADDRESS')
 bsc_wallet_address = os.environ.get('BSC_WALLET_ADDRESS')
 ton_wallet_address = os.environ.get("TON_WALLET_ADDRESS")
+tron_wallet_address = os.environ.get('TRON_WALLET_ADDRESS')
 
 
 def get_sol_balance():
@@ -58,7 +59,6 @@ def get_sol_usd_rate():
 
 
 def get_ton_balance():
-
     url = f"https://toncenter.com/api/v2/getAddressInformation"
     params = {
         "address": ton_wallet_address,
@@ -118,11 +118,13 @@ def get_bnb_balance():
         return balance_wei / 1e18  # Конвертируем из Wei в BNB
     return -1
 
+
 def get_bnb_usd_rate():
     response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=binancecoin&vs_currencies=usd")
     if response.status_code == 200:
         return response.json().get("binancecoin", {}).get("usd", 1)
     return -1
+
 
 def get_usdt_bnb_balance():
     # Получаем баланс USDT через BSC API
@@ -140,4 +142,96 @@ def get_usdt_bnb_balance():
         return balance_wei / 1e18  # Конвертируем из Wei в USDT
     return -1
 
-print(get_bnb_balance())
+
+def get_base_eth_balance():
+    """
+    Получение баланса ETH на сети Base.
+    """
+    url = f"https://api.basescan.org/api"
+    params = {
+        "module": "account",
+        "action": "balance",
+        "address": os.environ.get("BASE_WALLET_ADDRESS"),
+        "apikey": os.environ.get("BASE_API_KEY"),
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        balance_wei = int(response.json().get("result", 0))
+        return balance_wei / 1e18  # Конвертация из Wei в ETH
+    return 0
+
+
+def get_base_usdc_balance():
+    """
+    Получение баланса USDC на сети Base.
+    """
+    url = f"https://api.basescan.org/api"
+    params = {
+        "module": "account",
+        "action": "tokenbalance",
+        "contractaddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",  # Укажите адрес контракта USDC в сети Base
+        "address": os.environ.get("BASE_WALLET_ADDRESS"),
+        "apikey": os.environ.get("BASE_API_KEY"),
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        balance_wei = int(response.json().get("result", 0))
+        return balance_wei / 1e6  # Конвертация из минимальной единицы в USDC
+    return 0
+
+
+def get_eth_usd_rate():
+    """
+    Получение текущего курса ETH/USD.
+    """
+    response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd")
+    if response.status_code == 200:
+        return response.json().get("ethereum", {}).get("usd", 1)
+    return -1
+
+
+def get_trx_balance():
+    """
+    Получение баланса TRX на сети TRON.
+    """
+    url = f"https://apilist.tronscanapi.com/api/account"
+    params = {
+        "address": tron_wallet_address,
+        "apikey": os.environ.get("TRON_API_KEY"),
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        result = response.json()
+        if result and "balance" in result:
+            return result["balance"] / 1e6  # Конвертируем из Sun в TRX
+    return 0
+
+
+def get_usdt_trx_balance():
+    """
+    Получение баланса USDT на сети TRON.
+    """
+    url = f"https://apilist.tronscanapi.com/api/account/tokens"
+    params = {
+        "address": tron_wallet_address,
+        "apikey": os.environ.get("TRON_API_KEY"),
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        result = response.json()
+        for token in result.get("tokens", []):
+            if token.get("tokenName") == "Tether USD":
+                return float(token.get("balance", 0)) / 1e6  # Конвертация в USDT
+    return 0
+
+
+def get_trx_usd_rate():
+    """
+    Получение курса TRX/USD.
+    """
+    response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=tron&vs_currencies=usd")
+    if response.status_code == 200:
+        return response.json().get("tron", {}).get("usd", 1)
+    return -1
+
+print(get_base_eth_balance())

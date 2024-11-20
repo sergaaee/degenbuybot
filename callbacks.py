@@ -8,7 +8,8 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message
 from aiogram.utils.text_decorations import html_decoration
 
-from api_calls import get_ton_balance, get_usdt_bnb_balance, get_bnb_balance
+from api_calls import get_ton_balance, get_usdt_bnb_balance, get_bnb_balance, get_base_usdc_balance, \
+    get_base_eth_balance, get_usdt_trx_balance, get_trx_balance
 from crud.transactions import get_transaction_by_telegram_id, create_transaction
 from crud.users import get_user_by_telegram_id, create_user
 from database import Subscription
@@ -27,6 +28,7 @@ sol_wallet_address = os.environ.get("SOL_WALLET_ADDRESS")
 usdt_sol_mint_address = os.environ.get("USDT_SOL_MINT_ADDRESS")
 ton_wallet_address = os.environ.get("TON_WALLET_ADDRESS")
 bsc_wallet_address = os.environ.get("BSC_WALLET_ADDRESS")
+tron_wallet_address = os.environ.get("TRON_WALLET_ADDRESS")
 
 router = Router()  # Создаем роутер для всех обработчиков
 
@@ -296,6 +298,130 @@ async def pay_in_usdt_bnb_callback(callback: CallbackQuery):
     )
 
 
+@router.callback_query(F.data == "pay_in_ETH_BASE")
+async def pay_in_eth_base_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    transaction = get_transaction_by_telegram_id(session, user_id)
+
+    if not transaction or transaction.currency:
+        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
+        return
+
+    from api_calls import get_base_eth_balance, get_eth_usd_rate
+
+    eth_usd_rate = get_eth_usd_rate()
+    if eth_usd_rate <= 0:
+        await callback.message.edit_text("Не удалось получить курс ETH/USD. Попробуйте позже.")
+        return
+
+    price_in_usd = transaction.expected_amount
+    price_in_eth = price_in_usd / eth_usd_rate
+
+    current_balance = get_base_eth_balance()
+    expected_amount = current_balance + price_in_eth
+
+    transaction.currency = "ETH"
+    transaction.blockchain = "Base"
+    transaction.expected_amount = expected_amount
+    session.commit()
+
+    await callback.message.edit_text(
+        f"Пополните кошелек минимум на {expected_amount - current_balance:.6f} ETH.\n"
+        f"Текущий курс: 1 ETH = ${eth_usd_rate:.2f}\n\n"
+        f"Адрес: `{os.environ.get('BASE_WALLET_ADDRESS')}`",
+        reply_markup=get_check_payment_keyboard(cancel_button=True),
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "pay_in_USDC_BASE")
+async def pay_in_usdc_base_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    transaction = get_transaction_by_telegram_id(session, user_id)
+
+    if not transaction or transaction.currency:
+        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
+        return
+
+    from api_calls import get_base_usdc_balance
+
+    current_balance = get_base_usdc_balance()
+    expected_amount = current_balance + transaction.expected_amount
+
+    transaction.currency = "USDC"
+    transaction.blockchain = "Base"
+    transaction.expected_amount = expected_amount
+    session.commit()
+
+    await callback.message.edit_text(
+        f"Пополните кошелек минимум на {expected_amount - current_balance:.2f} USDC.\n\nАдрес: `{os.environ.get('BASE_WALLET_ADDRESS')}`",
+        reply_markup=get_check_payment_keyboard(cancel_button=True),
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "pay_in_TRX")
+async def pay_in_trx_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    transaction = get_transaction_by_telegram_id(session, user_id)
+
+    if not transaction or transaction.currency:
+        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
+        return
+
+    from api_calls import get_trx_balance, get_trx_usd_rate
+
+    trx_usd_rate = get_trx_usd_rate()
+    if trx_usd_rate <= 0:
+        await callback.message.edit_text("Не удалось получить курс TRX/USD. Попробуйте позже.")
+        return
+
+    price_in_usd = transaction.expected_amount
+    price_in_trx = price_in_usd / trx_usd_rate
+
+    current_balance = get_trx_balance()
+    expected_amount = current_balance + price_in_trx
+
+    transaction.currency = "TRX"
+    transaction.blockchain = "TRON"
+    transaction.expected_amount = expected_amount
+    session.commit()
+
+    await callback.message.edit_text(
+        f"Пополните кошелек минимум на {expected_amount - current_balance:.6f} TRX.\n"
+        f"Текущий курс: 1 TRX = ${trx_usd_rate:.2f}\n\n"
+        f"Адрес: `{tron_wallet_address}`",
+        reply_markup=get_check_payment_keyboard(cancel_button=True),
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "pay_in_USDT_TRON")
+async def pay_in_usdt_tron_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    transaction = get_transaction_by_telegram_id(session, user_id)
+
+    if not transaction or transaction.currency:
+        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
+        return
+
+    from api_calls import get_usdt_trx_balance
+
+    current_balance = get_usdt_trx_balance()
+    expected_amount = current_balance + transaction.expected_amount
+
+    transaction.currency = "USDT"
+    transaction.blockchain = "TRON"
+    transaction.expected_amount = expected_amount
+    session.commit()
+
+    await callback.message.edit_text(
+        f"Пополните кошелек минимум на {expected_amount - current_balance:.2f} USDT.\n\nАдрес: `{tron_wallet_address}`",
+        reply_markup=get_check_payment_keyboard(cancel_button=True),
+        parse_mode="Markdown"
+    )
+
+
 
 @router.callback_query(F.data == "check_payment")
 async def check_payment_callback(callback: CallbackQuery) -> None:
@@ -319,6 +445,14 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
         current_balance = get_usdt_bnb_balance()
     elif transaction.blockchain == "BSC" and transaction.currency == "BNB":
         current_balance = get_bnb_balance()
+    elif transaction.blockchain == "Base" and transaction.currency == "USDC":
+        current_balance = get_base_usdc_balance()
+    elif transaction.blockchain == "Base" and transaction.currency == "ETH":
+        current_balance = get_base_eth_balance()
+    elif transaction.blockchain == "TRON" and transaction.currency == "USDT":
+        current_balance = get_usdt_trx_balance()
+    elif transaction.blockchain == "TRON" and transaction.currency == "TRX":
+        current_balance = get_trx_balance()
 
     if current_balance >= transaction.expected_amount:
         # Обновляем статус транзакции

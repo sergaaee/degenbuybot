@@ -45,11 +45,15 @@ def get_check_payment_keyboard(cancel_button=False):
 
 def get_currency_selection_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="Оплатить в SOL", callback_data="pay_in_SOL")
-    builder.button(text="Оплатить в USDT SOL", callback_data="pay_in_USDT_SOL")
-    builder.button(text="Оплатить в BNB", callback_data="pay_in_BNB")
-    builder.button(text="Оплатить в USDT BNB", callback_data="pay_in_USDT_BNB")
-    builder.button(text="Оплатить в TON", callback_data="pay_in_TON")
+    builder.button(text="SOL", callback_data="pay_in_SOL")
+    builder.button(text="USDT SOL", callback_data="pay_in_USDT_SOL")
+    builder.button(text="BNB", callback_data="pay_in_BNB")
+    builder.button(text="USDT BNB", callback_data="pay_in_USDT_BNB")
+    builder.button(text="ETH (Base)", callback_data="pay_in_ETH_BASE")
+    builder.button(text="USDC (Base)", callback_data="pay_in_USDC_BASE")
+    builder.button(text="TRX (TRON)", callback_data="pay_in_TRX")
+    builder.button(text="USDT (TRON)", callback_data="pay_in_USDT_TRON")
+    builder.button(text="TON", callback_data="pay_in_TON")
     builder.adjust(2)
     return builder.as_markup()
 
