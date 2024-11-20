@@ -4,9 +4,11 @@ from datetime import datetime
 import os
 
 from aiogram import Router
+from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart, Command, ChatMemberUpdatedFilter, IS_NOT_MEMBER, MEMBER
 from aiogram.types import Message, ChatMemberUpdated, ChatPermissions
-from aiogram.utils.text_decorations import html_decoration
+
+import strings
 
 from api_calls import get_ton_balance, get_usdt_bnb_balance, get_bnb_balance, get_base_usdc_balance, \
     get_base_eth_balance, get_usdt_trx_balance, get_trx_balance
@@ -76,8 +78,9 @@ async def command_start_handler(message: Message):
             await message.answer("Попытка не пытка")
 
     await message.answer(
-        f"Привет, {html_decoration.bold(message.from_user.full_name)}! Выбери один из вариантов:",
-        reply_markup=get_main_inline_keyboard()
+        strings.formatted_welcome,
+        reply_markup=get_main_inline_keyboard(),
+        parse_mode=ParseMode.MARKDOWN_V2
     )
 
 
@@ -149,7 +152,7 @@ async def tariff_callback(callback: CallbackQuery) -> None:
     )
 
     await callback.message.edit_text(
-        f"Вы выбрали подписку '{subscription_type}' на {period}. Стоимость: {amount} USD.\nВыберите валюту для оплаты.",
+        f"Вы выбрали подписку '{subscription_type}' на {period}. Стоимость: USD{amount}.\nВыберите валюту для оплаты.",
         reply_markup=get_currency_selection_keyboard()
     )
 
@@ -273,9 +276,9 @@ async def cancel_payment_callback(callback: CallbackQuery) -> None:
         # Удаляем транзакцию из базы
         session.delete(transaction)
         session.commit()
-        await callback.message.edit_text("Транзакция отменена.")
+        await callback.message.edit_text("Оплата отменена.")
     else:
-        await callback.message.edit_text("Активная транзакция не найдена.")
+        await callback.message.edit_text("Активная заявка на оплату не найдена.")
 
 
 @router.callback_query(F.data == "pay_in_BNB")
@@ -470,8 +473,11 @@ async def referral_command_handler(message: Message):
     bot_username = (await bot.me()).username
     referral_link = f"https://t.me/{bot_username}?start={telegram_id}"
 
+    formatted_referral = strings.referral_template.format(referral_link=referral_link)
+
     await message.answer(
-        f"Ваша реферальная ссылка:\n\n{referral_link}",
+        formatted_referral,
+        parse_mode=ParseMode.HTML  # Указываем использование HTML
     )
 
 
@@ -481,8 +487,11 @@ async def referral_command_callback_handler(callback: CallbackQuery):
     bot_username = (await bot.me()).username
     referral_link = f"https://t.me/{bot_username}?start={telegram_id}"
 
+    formatted_referral = strings.referral_template.format(referral_link=referral_link)
+
     await callback.message.answer(
-        f"Ваша реферальная ссылка:\n\n{referral_link}",
+        formatted_referral,
+        parse_mode=ParseMode.HTML  # Указываем использование HTML
     )
 
 
@@ -553,6 +562,6 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
                 f"\n\nСсылка: {invite_link.invite_link}"
             )
     else:
-        temp_message = await callback.message.answer("Оплата пока не поступила. Попробуйте позже.")
+        temp_message = await callback.message.answer("Оплата еще не поступила, попробуйте позже.")
         await asyncio.sleep(5)
         await temp_message.delete()
