@@ -29,3 +29,28 @@ def extend_subscription(session: Session, telegram_id: int) -> Subscription:
         session.commit()
         session.refresh(new_subscription)
         return new_subscription
+
+
+def is_user_muted(session: Session, user_id: int) -> bool:
+    """
+    Проверяет, есть ли у пользователя подписка 'Без чата'.
+    """
+    subscription = (
+        session.query(Subscription)
+        .filter(Subscription.user_id == user_id, Subscription.expiration_date > datetime.utcnow())
+        .first()
+    )
+    return subscription and subscription.chat_id == "without_chat"
+
+
+def create_subscription(session: Session, telegram_id: int, subscription_type: str) -> Subscription:
+    chat_id = "without_chat" if subscription_type == "Без чата" else "with_chat"
+    new_subscription = Subscription(
+        user_id=telegram_id,
+        expiration_date=datetime.utcnow() + timedelta(days=30),  # Пример: 30 дней
+        chat_id=chat_id,
+        muted=(subscription_type == "Без чата")
+    )
+    session.add(new_subscription)
+    session.commit()
+    return new_subscription

@@ -1,19 +1,18 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import os
 
 from aiogram import Router
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message
+from aiogram.filters import CommandStart, Command, ChatMemberUpdatedFilter, IS_NOT_MEMBER, MEMBER
+from aiogram.types import Message, ChatMemberUpdated, ChatPermissions
 from aiogram.utils.text_decorations import html_decoration
 
 from api_calls import get_ton_balance, get_usdt_bnb_balance, get_bnb_balance, get_base_usdc_balance, \
     get_base_eth_balance, get_usdt_trx_balance, get_trx_balance
-from crud.subscriptions import extend_subscription
+from crud.subscriptions import extend_subscription, is_user_muted, create_subscription
 from crud.transactions import get_transaction_by_telegram_id, create_transaction
 from crud.users import get_user_by_telegram_id, create_user
-from database import Subscription
 from aiogram import F
 from aiogram.types import CallbackQuery
 from keyboards import (
@@ -32,6 +31,31 @@ bsc_wallet_address = os.environ.get("BSC_WALLET_ADDRESS")
 tron_wallet_address = os.environ.get("TRON_WALLET_ADDRESS")
 
 router = Router()  # Создаем роутер для всех обработчиков
+
+
+@router.chat_member(
+    ChatMemberUpdatedFilter(
+        member_status_changed=IS_NOT_MEMBER >> MEMBER
+    )
+)
+async def on_user_joined(update: ChatMemberUpdated):
+    user_id = update.from_user.id
+    chat_id = update.chat.id
+
+    if update.new_chat_member.status == "member":  # Пользователь только что присоединился
+        # Проверяем, есть ли подписка "Без чата"
+        if is_user_muted(session, user_id):
+            # Выдаем мут пользователю
+            await bot.restrict_chat_member(
+                chat_id=chat_id,
+                user_id=user_id,
+                permissions=ChatPermissions(
+                    can_send_messages=False,
+                    can_send_media_messages=False,
+                    can_send_other_messages=False,
+                    can_add_web_page_previews=False,
+                )
+            )
 
 
 @router.message(CommandStart())
@@ -88,6 +112,7 @@ async def tariff_callback(callback: CallbackQuery) -> None:
     """
     user_id = callback.from_user.id
     existing_transaction = get_transaction_by_telegram_id(session, user_id)
+
     if existing_transaction and existing_transaction.status == "Pending" and \
             (datetime.utcnow() - existing_transaction.created_at).total_seconds() < 15 * 60:
         await callback.message.edit_text(
@@ -96,26 +121,35 @@ async def tariff_callback(callback: CallbackQuery) -> None:
         )
         return
 
+    # Определяем тип подписки и период
+    is_with_chat = callback.data.startswith("with_chat_")
     period = callback.data.split("_")[-1]  # Например, "1w", "1m", "3m"
-    period_prices = {
-        "1w": 0.1,
-        "1m": 100,
-        "3m": 400
-    }
-    amount = period_prices.get(period, 0)  # Цена в USD
 
-    # Создаем транзакцию с указанием blockchain
+    # Определяем цену
+    base_prices = {
+        "1m": 50,  # Базовая цена "С чатом" за месяц
+        "3m": 130,  # Базовая цена "С чатом" за три месяца
+        "6m": 250,
+        "1y": 490,
+        "lt": 1500,
+    }
+    amount = base_prices.get(period, 0) / 2 if not is_with_chat else base_prices.get(period, 0)
+
+    subscription_type = "С чатом" if is_with_chat else "Без чата"
+
+    # Создаём транзакцию
     create_transaction(
         session=session,
         telegram_id=user_id,
         blockchain="",  # Укажите конкретную блокчейн-сеть
         expected_amount=amount,
         currency="",  # Валюта будет выбрана позже
+        with_chat=is_with_chat,
         period=period,
     )
 
     await callback.message.edit_text(
-        f"Вы выбрали тариф на {period}. Выберите валюту для оплаты.",
+        f"Вы выбрали подписку '{subscription_type}' на {period}. Стоимость: {amount} USD.\nВыберите валюту для оплаты.",
         reply_markup=get_currency_selection_keyboard()
     )
 
@@ -484,41 +518,35 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
 
     if current_balance >= transaction.expected_amount:
         user = get_user_by_telegram_id(session, user_id)
+
+        # Если у пользователя есть пригласивший, продлеваем подписку пригласившему
         if user.invited_by:
             updated_subscription = extend_subscription(session, user.invited_by)
-            await bot.send_message(chat_id=user.invited_by)
+            await bot.send_message(chat_id=user.invited_by, text="Ваша подписка была продлена благодаря рефералу!")
 
         # Обновляем статус транзакции
         transaction.status = "Success"
         session.commit()
 
-        # Создаем одноразовую ссылку
-        chat_id = "-1002225835813"  # Заглушка
+        # Определяем тип подписки
+        subscription_type = "Без чата" if not transaction.with_chat else "С чатом"  # Пример определения
+
+        # Создаем подписку
+        subscription = create_subscription(session, user_id, subscription_type)
+
+        # Создаем или используем существующую ссылку для чата
+        chat_id = "-1002225835813"  # ID вашего чата
+        bot.unban_chat_member(chat_id, user_id)
         invite_link = await bot.create_chat_invite_link(chat_id, expire_date=None, member_limit=1)
-
-        # Отправляем пользователю одноразовую ссылку
-        await callback.message.edit_text(
-            f"Оплата успешно выполнена! Вот ваша одноразовая ссылка на чат:\n\n{invite_link.invite_link}"
-        )
-
-        # Добавляем запись в таблицу Subscriptions
-        period = {
-            "1w": 7,
-            "1m": 30,
-            "3m": 180,
-        }
-
-        delta = period.get(transaction.period, 0)
-
-        if delta == 0:
+        if subscription_type == "С чатом":
             await callback.message.edit_text(
-                "Оплата прошла успешно, но с выдачей доступа что-то пошло не так, пожалуйста, свяжитесь с @d10658")
-            return
-
-        expiration_date = datetime.utcnow() + timedelta(days=delta)
-        subscription = Subscription(user_id=user_id, expiration_date=expiration_date, chat_id=chat_id)
-        session.add(subscription)
-        session.commit()
+                f"Оплата успешно выполнена! Вот ваша одноразовая ссылка на чат:\n\n{invite_link.invite_link}"
+            )
+        else:
+            await callback.message.edit_text(
+                f"Оплата успешно выполнена! Ваша подписка 'Без чата' активирована до {subscription.expiration_date.strftime('%Y-%m-%d')}."
+                f"\n\nСсылка: {invite_link.invite_link}"
+            )
     else:
         temp_message = await callback.message.answer("Оплата пока не поступила. Попробуйте позже.")
         await asyncio.sleep(5)

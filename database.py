@@ -1,9 +1,8 @@
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, ForeignKey
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import uuid
-import os
 
 Base = declarative_base()
 
@@ -31,6 +30,7 @@ class Transaction(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     period = Column(String, nullable=True)
     referral_code = Column(String, nullable=True)
+    with_chat = Column(Boolean, nullable=False, default=False)
 
 
 class Subscription(Base):
@@ -40,6 +40,7 @@ class Subscription(Base):
     user_id = Column(Integer, ForeignKey('users.telegram_id'), nullable=False)
     expiration_date = Column(DateTime, nullable=False)
     chat_id = Column(String, nullable=False)  # ID чата, куда добавляется пользователь
+    muted = Column(Boolean, nullable=False, default=False)
 
 
 # Инициализация базы данных
