@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 sol_wallet_address = os.environ.get('SOL_WALLET_ADDRESS')
+bsc_wallet_address = os.environ.get('BSC_WALLET_ADDRESS')
+ton_wallet_address = os.environ.get("TON_WALLET_ADDRESS")
 
 
 def get_sol_balance():
@@ -56,7 +58,6 @@ def get_sol_usd_rate():
 
 
 def get_ton_balance():
-    ton_wallet_address = os.environ.get("TON_WALLET_ADDRESS")
 
     url = f"https://toncenter.com/api/v2/getAddressInformation"
     params = {
@@ -101,3 +102,42 @@ def get_ton_usd_rate():
         raise SystemExit(f"Ошибка соединения: {e}")
     except ValueError as e:
         raise SystemExit(f"Ошибка данных: {e}")
+
+
+def get_bnb_balance():
+    url = f"https://api.bscscan.com/api"
+    params = {
+        "module": "account",
+        "action": "balance",
+        "address": bsc_wallet_address,
+        "apikey": os.environ.get("BSC_API_KEY"),
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        balance_wei = int(response.json().get("result", 0))
+        return balance_wei / 1e18  # Конвертируем из Wei в BNB
+    return -1
+
+def get_bnb_usd_rate():
+    response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=binancecoin&vs_currencies=usd")
+    if response.status_code == 200:
+        return response.json().get("binancecoin", {}).get("usd", 1)
+    return -1
+
+def get_usdt_bnb_balance():
+    # Получаем баланс USDT через BSC API
+    url = f"https://api.bscscan.com/api"
+    params = {
+        "module": "account",
+        "action": "tokenbalance",
+        "contractaddress": "0x55d398326f99059ff775485246999027b3197955",  # Укажите контракт USDT на BSC
+        "address": bsc_wallet_address,
+        "apikey": os.environ.get("BSC_API_KEY"),
+    }
+    response = requests.get(url, params=params)
+    if response.status_code == 200:
+        balance_wei = int(response.json().get("result", 0))
+        return balance_wei / 1e18  # Конвертируем из Wei в USDT
+    return -1
+
+print(get_bnb_balance())

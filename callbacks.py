@@ -8,7 +8,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message
 from aiogram.utils.text_decorations import html_decoration
 
-from api_calls import get_ton_balance
+from api_calls import get_ton_balance, get_usdt_bnb_balance, get_bnb_balance
 from crud.transactions import get_transaction_by_telegram_id, create_transaction
 from crud.users import get_user_by_telegram_id, create_user
 from database import Subscription
@@ -26,6 +26,7 @@ load_dotenv()
 sol_wallet_address = os.environ.get("SOL_WALLET_ADDRESS")
 usdt_sol_mint_address = os.environ.get("USDT_SOL_MINT_ADDRESS")
 ton_wallet_address = os.environ.get("TON_WALLET_ADDRESS")
+bsc_wallet_address = os.environ.get("BSC_WALLET_ADDRESS")
 
 router = Router()  # Создаем роутер для всех обработчиков
 
@@ -233,6 +234,69 @@ async def cancel_payment_callback(callback: CallbackQuery) -> None:
         await callback.message.edit_text("Активная транзакция не найдена.")
 
 
+@router.callback_query(F.data == "pay_in_BNB")
+async def pay_in_bnb_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    transaction = get_transaction_by_telegram_id(session, user_id)
+
+    if not transaction or transaction.currency:
+        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
+        return
+
+    from api_calls import get_bnb_balance, get_bnb_usd_rate
+
+    bnb_usd_rate = get_bnb_usd_rate()
+    if bnb_usd_rate <= 0:
+        await callback.message.edit_text("Не удалось получить курс BNB/USD. Попробуйте позже.")
+        return
+
+    price_in_usd = transaction.expected_amount
+    price_in_bnb = price_in_usd / bnb_usd_rate
+
+    current_balance = get_bnb_balance()
+    expected_amount = current_balance + price_in_bnb
+
+    transaction.currency = "BNB"
+    transaction.blockchain = "BSC"
+    transaction.expected_amount = expected_amount
+    session.commit()
+
+    await callback.message.edit_text(
+        f"Пополните кошелек минимум на {expected_amount - current_balance:.6f} BNB.\n"
+        f"Текущий курс: 1 BNB = ${bnb_usd_rate:.2f}\n\n"
+        f"Адрес: `{bsc_wallet_address}`",
+        reply_markup=get_check_payment_keyboard(cancel_button=True),
+        parse_mode="Markdown"
+    )
+
+
+@router.callback_query(F.data == "pay_in_USDT_BNB")
+async def pay_in_usdt_bnb_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    transaction = get_transaction_by_telegram_id(session, user_id)
+
+    if not transaction or transaction.currency:
+        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
+        return
+
+    from api_calls import get_usdt_bnb_balance
+
+    current_balance = get_usdt_bnb_balance()
+    expected_amount = current_balance + transaction.expected_amount
+
+    transaction.currency = "USDT"
+    transaction.blockchain = "BSC"
+    transaction.expected_amount = expected_amount
+    session.commit()
+
+    await callback.message.edit_text(
+        f"Пополните кошелек минимум на {expected_amount - current_balance:.2f} USDT.\n\nАдрес: `{bsc_wallet_address}`",
+        reply_markup=get_check_payment_keyboard(cancel_button=True),
+        parse_mode="Markdown"
+    )
+
+
+
 @router.callback_query(F.data == "check_payment")
 async def check_payment_callback(callback: CallbackQuery) -> None:
     user_id = callback.from_user.id
@@ -246,11 +310,15 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
     from api_calls import get_sol_balance, get_sol_token_balances
     if transaction.currency == "SOL":
         current_balance = get_sol_balance()
-    elif transaction.currency == "USDT":
+    elif transaction.blockchain == "Solana" and transaction.currency == "USDT":
         token_balances = get_sol_token_balances()
         current_balance = token_balances.get(usdt_sol_mint_address, 0)
     elif transaction.currency == "TON":
         current_balance = get_ton_balance()
+    elif transaction.blockchain == "BSC" and transaction.currency == "USDT":
+        current_balance = get_usdt_bnb_balance()
+    elif transaction.blockchain == "BSC" and transaction.currency == "BNB":
+        current_balance = get_bnb_balance()
 
     if current_balance >= transaction.expected_amount:
         # Обновляем статус транзакции
