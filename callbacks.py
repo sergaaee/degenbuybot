@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta
 
+import os
 
 from aiogram import Router
 from aiogram.filters import CommandStart
@@ -18,8 +19,14 @@ from keyboards import (
     get_without_chat_inline_keyboard, get_check_payment_keyboard, get_currency_selection_keyboard,
 )
 from main import bot, session
+from dotenv import load_dotenv
+
+load_dotenv()
+sol_wallet_address = os.environ.get("SOL_WALLET_ADDRESS")
+usdt_sol_mint_address = os.environ.get("USDT_SOL_MINT_ADDRESS")
 
 router = Router()  # Создаем роутер для всех обработчиков
+
 
 @router.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
@@ -35,6 +42,7 @@ async def command_start_handler(message: Message) -> None:
         f"Привет, {html_decoration.bold(message.from_user.full_name)}! Выбери один из вариантов:",
         reply_markup=get_main_inline_keyboard()
     )
+
 
 @router.callback_query(F.data == "with_chat")
 async def with_chat_callback(callback: CallbackQuery) -> None:
@@ -108,7 +116,6 @@ async def pay_in_sol_callback(callback: CallbackQuery) -> None:
         await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
         return
 
-    wallet_address = "AB995FrQskZWFZMEf6hSnHMonJYk86CPipQN5ny7Y3pr"  # Укажите SOL кошелек
     from api_calls import get_balance, get_sol_usd_rate
 
     # Получаем текущий курс SOL/USD
@@ -122,7 +129,7 @@ async def pay_in_sol_callback(callback: CallbackQuery) -> None:
     price_in_sol = price_in_usd / sol_usd_rate  # Конвертируем в SOL
 
     # Получаем текущий баланс кошелька
-    current_balance = get_balance(wallet_address)
+    current_balance = get_balance(sol_wallet_address)
     expected_amount = current_balance + price_in_sol  # Баланс + стоимость в SOL
 
     # Обновляем транзакцию
@@ -133,11 +140,10 @@ async def pay_in_sol_callback(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
         f"Пополните кошелек минимум на {expected_amount - current_balance:.6f} SOL.\n"
         f"Текущий курс: 1 SOL = ${sol_usd_rate:.2f}\n\n"
-        f"Адрес: `{wallet_address}`",
+        f"Адрес: `{sol_wallet_address}`",
         reply_markup=get_check_payment_keyboard(cancel_button=True),
         parse_mode="Markdown"
     )
-
 
 
 @router.callback_query(F.data == "pay_in_USDT")
@@ -149,12 +155,10 @@ async def pay_in_usdt_callback(callback: CallbackQuery) -> None:
         await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
         return
 
-    wallet_address = "AB995FrQskZWFZMEf6hSnHMonJYk86CPipQN5ny7Y3pr"  # Укажите USDT кошелек
     from api_calls import get_token_balances
 
-    token_balances = get_token_balances(wallet_address)
-    usdt_mint_address = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"  # Mint-адрес USDT
-    current_balance = token_balances.get(usdt_mint_address, 0)
+    token_balances = get_token_balances(sol_wallet_address)
+    current_balance = token_balances.get(usdt_sol_mint_address, 0)
     expected_amount = current_balance + transaction.expected_amount  # Баланс + стоимость тарифа
 
     transaction.currency = "USDT"
@@ -162,7 +166,7 @@ async def pay_in_usdt_callback(callback: CallbackQuery) -> None:
     session.commit()
 
     await callback.message.edit_text(
-        f"Пополните кошелек минимум на {expected_amount - current_balance:.2f} USDT.\n\nАдрес: `{wallet_address}`",
+        f"Пополните кошелек минимум на {expected_amount - current_balance:.2f} USDT.\n\nАдрес: `{sol_wallet_address}`",
         reply_markup=get_check_payment_keyboard(cancel_button=True),
         parse_mode="Markdown",
     )
@@ -194,15 +198,13 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
         await callback.message.edit_text("Не найдена активная транзакция для проверки.")
         return
 
-    wallet_address = "AB995FrQskZWFZMEf6hSnHMonJYk86CPipQN5ny7Y3pr"
 
     from api_calls import get_balance, get_token_balances
     if transaction.currency == "SOL":
-        current_balance = get_balance(wallet_address)
+        current_balance = get_balance(sol_wallet_address)
     elif transaction.currency == "USDT":
-        token_balances = get_token_balances(wallet_address)
-        usdt_mint_address = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
-        current_balance = token_balances.get(usdt_mint_address, 0)
+        token_balances = get_token_balances(sol_wallet_address)
+        current_balance = token_balances.get(usdt_sol_mint_address, 0)
 
     if current_balance >= transaction.expected_amount:
         # Обновляем статус транзакции
@@ -228,7 +230,8 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
         delta = period.get(transaction.period, 0)
 
         if delta == 0:
-            await callback.message.edit_text("Оплата прошла успешно, но с выдачей доступа что-то пошло не так, пожалуйста, свяжитесь с @d10658")
+            await callback.message.edit_text(
+                "Оплата прошла успешно, но с выдачей доступа что-то пошло не так, пожалуйста, свяжитесь с @d10658")
             return
 
         expiration_date = datetime.utcnow() + timedelta(days=delta)
