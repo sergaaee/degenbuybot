@@ -1,13 +1,18 @@
 import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+sol_wallet_address = os.environ.get('SOL_WALLET_ADDRESS')
 
 
-def get_balance(wallet_address):
+def get_sol_balance():
     url = "https://api.mainnet-beta.solana.com"
     data = {
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getBalance",
-        "params": [wallet_address]
+        "params": [sol_wallet_address]
     }
     response = requests.post(url, json=data)
     if response.status_code == 200:
@@ -15,7 +20,7 @@ def get_balance(wallet_address):
     return 0
 
 
-def get_token_balances(wallet_address):
+def get_sol_token_balances():
     """
     Получение баланса всех токенов, привязанных к указанному кошельку.
     """
@@ -25,7 +30,7 @@ def get_token_balances(wallet_address):
         "id": 1,
         "method": "getTokenAccountsByOwner",
         "params": [
-            wallet_address,
+            sol_wallet_address,
             {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},  # Программа токенов SPL
             {"encoding": "jsonParsed"}
         ]
@@ -47,7 +52,52 @@ def get_sol_usd_rate():
     response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
     if response.status_code == 200:
         return response.json().get("solana", {}).get("usd", 1)
-    return 1  # Возвращаем 1 как заглушку
+    return -1
 
-#Es9vMFrzaCERkH4MG4u6ecG75Dbfydf4tBhQPgJcx7t
-print(get_token_balances("AB995FrQskZWFZMEf6hSnHMonJYk86CPipQN5ny7Y3pr"))
+
+def get_ton_balance():
+    ton_wallet_address = os.environ.get("TON_WALLET_ADDRESS")
+
+    url = f"https://toncenter.com/api/v2/getAddressInformation"
+    params = {
+        "address": ton_wallet_address,
+        "api_key": os.environ.get("TON_API_KEY"),
+    }
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("ok"):
+            # Баланс возвращается в нанотонах, конвертируем в TON
+            balance_in_ton = int(data["result"]["balance"]) / 10 ** 9
+            return balance_in_ton
+        else:
+            raise ValueError(f"Ошибка в API: {data.get('error')}")
+    except requests.RequestException as e:
+        raise SystemExit(f"Ошибка соединения: {e}")
+    except ValueError as e:
+        raise SystemExit(f"Ошибка данных: {e}")
+
+
+def get_ton_usd_rate():
+    url = f"https://tonapi.io/v2/rates"
+    params = {
+        "tokens": "ton",
+        "currencies": "usd",
+    }
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        if data:
+            try:
+                return data.get("rates", {}).get("TON", {}).get("prices", {}).get("USD", {})
+            except ValueError:
+                raise ValueError("Курс TON/USD не найден.")
+        else:
+            raise ValueError(f"Ошибка в API: {data.get('error')}")
+    except requests.RequestException as e:
+        raise SystemExit(f"Ошибка соединения: {e}")
+    except ValueError as e:
+        raise SystemExit(f"Ошибка данных: {e}")
