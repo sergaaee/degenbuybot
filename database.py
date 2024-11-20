@@ -16,6 +16,7 @@ class User(Base):
     username = Column(String, unique=True, nullable=True)
     telegram_id = Column(Integer, unique=True, nullable=False)
     reg_date = Column(DateTime, default=datetime.utcnow)
+    invited_by = Column(Integer, nullable=True)
 
 
 class Transaction(Base):
@@ -29,8 +30,7 @@ class Transaction(Base):
     status = Column(String, default="Pending")  # Pending, Success, или Failed
     created_at = Column(DateTime, default=datetime.utcnow)
     period = Column(String, nullable=True)
-
-
+    referral_code = Column(String, nullable=True)
 
 
 class Subscription(Base):

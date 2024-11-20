@@ -7,6 +7,7 @@ def get_main_inline_keyboard():
     """
     builder = InlineKeyboardBuilder()
     builder.button(text="С чатом", callback_data="with_chat")
+    builder.button(text="Реферальный код", callback_data="referral_code")
     #builder.button(text="Без чата", callback_data="without_chat")
     builder.adjust(1)  # Кнопки в один ряд
     return builder.as_markup()

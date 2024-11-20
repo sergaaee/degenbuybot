@@ -4,12 +4,13 @@ from datetime import datetime, timedelta
 import os
 
 from aiogram import Router
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
 from aiogram.utils.text_decorations import html_decoration
 
 from api_calls import get_ton_balance, get_usdt_bnb_balance, get_bnb_balance, get_base_usdc_balance, \
     get_base_eth_balance, get_usdt_trx_balance, get_trx_balance
+from crud.subscriptions import extend_subscription
 from crud.transactions import get_transaction_by_telegram_id, create_transaction
 from crud.users import get_user_by_telegram_id, create_user
 from database import Subscription
@@ -34,15 +35,22 @@ router = Router()  # Создаем роутер для всех обработ�
 
 
 @router.message(CommandStart())
-async def command_start_handler(message: Message) -> None:
+async def command_start_handler(message: Message):
     telegram_id = message.from_user.id
     username = message.from_user.username
+    # Извлекаем аргументы команды /start
+    text_parts = message.text.split()
+    args = text_parts[1] if len(text_parts) > 1 else None
 
     # Проверяем, есть ли пользователь в базе
     user = get_user_by_telegram_id(session, telegram_id)
 
     if not user:
-        create_user(session, telegram_id, username)
+        # Если есть аргументы, записываем, кто пригласил
+        invited_by = int(args) if args and args.isdigit() else None
+        if not create_user(session, telegram_id, username, invited_by):
+            await message.answer("Попытка не пытка")
+
     await message.answer(
         f"Привет, {html_decoration.bold(message.from_user.full_name)}! Выбери один из вариантов:",
         reply_markup=get_main_inline_keyboard()
@@ -90,7 +98,7 @@ async def tariff_callback(callback: CallbackQuery) -> None:
 
     period = callback.data.split("_")[-1]  # Например, "1w", "1m", "3m"
     period_prices = {
-        "1w": 1,
+        "1w": 0.1,
         "1m": 100,
         "3m": 400
     }
@@ -422,6 +430,27 @@ async def pay_in_usdt_tron_callback(callback: CallbackQuery):
     )
 
 
+@router.message(Command("referral"))
+async def referral_command_handler(message: Message):
+    telegram_id = message.from_user.id
+    bot_username = (await bot.me()).username
+    referral_link = f"https://t.me/{bot_username}?start={telegram_id}"
+
+    await message.answer(
+        f"Ваша реферальная ссылка:\n\n{referral_link}",
+    )
+
+
+@router.callback_query(F.data == "referral_code")
+async def referral_command_callback_handler(callback: CallbackQuery):
+    telegram_id = callback.from_user.id
+    bot_username = (await bot.me()).username
+    referral_link = f"https://t.me/{bot_username}?start={telegram_id}"
+
+    await callback.message.answer(
+        f"Ваша реферальная ссылка:\n\n{referral_link}",
+    )
+
 
 @router.callback_query(F.data == "check_payment")
 async def check_payment_callback(callback: CallbackQuery) -> None:
@@ -431,7 +460,6 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
     if not transaction or transaction.status != "Pending":
         await callback.message.edit_text("Не найдена активная транзакция для проверки.")
         return
-
 
     from api_calls import get_sol_balance, get_sol_token_balances
     if transaction.currency == "SOL":
@@ -455,6 +483,11 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
         current_balance = get_trx_balance()
 
     if current_balance >= transaction.expected_amount:
+        user = get_user_by_telegram_id(session, user_id)
+        if user.invited_by:
+            updated_subscription = extend_subscription(session, user.invited_by)
+            await bot.send_message(chat_id=user.invited_by)
+
         # Обновляем статус транзакции
         transaction.status = "Success"
         session.commit()
