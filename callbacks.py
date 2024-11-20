@@ -561,7 +561,7 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
             )
         else:
             await callback.message.edit_text(
-                f"Оплата успешно выполнена! Ваша подписка 'Без чата' активирована до {subscription.expiration_date.strftime('%Y-%m-%d')}."
+                f"Оплата успешно выполнена! Ваша подписка без возможности писать активирована до {subscription.expiration_date.strftime('%Y-%m-%d')}."
                 f"\n\nСсылка: {invite_link.invite_link}"
             )
     else:
