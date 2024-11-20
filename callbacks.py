@@ -536,7 +536,12 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
 
         # Создаем или используем существующую ссылку для чата
         chat_id = "-1002225835813"  # ID вашего чата
-        bot.unban_chat_member(chat_id, user_id)
+
+        try:
+            bot.unban_chat_member(chat_id, user_id)
+        except Exception:
+            pass
+
         invite_link = await bot.create_chat_invite_link(chat_id, expire_date=None, member_limit=1)
         if subscription_type == "С чатом":
             await callback.message.edit_text(
