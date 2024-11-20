@@ -21,6 +21,7 @@ from keyboards import (
     get_main_inline_keyboard,
     get_with_chat_inline_keyboard,
     get_without_chat_inline_keyboard, get_check_payment_keyboard, get_currency_selection_keyboard,
+    get_back_to_main_menu_keyboard,
 )
 from main import bot, session
 from dotenv import load_dotenv
@@ -477,6 +478,7 @@ async def referral_command_handler(message: Message):
 
     await message.answer(
         formatted_referral,
+        reply_markup=get_back_to_main_menu_keyboard(),
         parse_mode=ParseMode.HTML  # Указываем использование HTML
     )
 
@@ -491,6 +493,7 @@ async def referral_command_callback_handler(callback: CallbackQuery):
 
     await callback.message.answer(
         formatted_referral,
+        reply_markup=get_back_to_main_menu_keyboard(),
         parse_mode=ParseMode.HTML  # Указываем использование HTML
     )
 

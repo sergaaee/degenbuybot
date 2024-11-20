@@ -63,4 +63,8 @@ def get_currency_selection_keyboard():
     builder.adjust(2)
     return builder.as_markup()
 
+def get_back_to_main_menu_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Назад", callback_data="back_to_main")
+    return builder.as_markup()
 
