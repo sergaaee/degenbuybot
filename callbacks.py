@@ -550,7 +550,7 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
         chat_id = "-1002225835813"  # ID вашего чата
 
         try:
-            bot.unban_chat_member(chat_id, user_id)
+            await bot.unban_chat_member(chat_id, user_id)
         except Exception:
             pass
 

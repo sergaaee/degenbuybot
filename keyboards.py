@@ -15,9 +15,9 @@ def get_with_chat_inline_keyboard():
     Inline-клавиатура для выбора тарифа 'С чатом'.
     """
     builder = InlineKeyboardBuilder()
-    builder.button(text="1M=50$", callback_data="with_chat_1w")
-    builder.button(text="3M=130$", callback_data="with_chat_1m")
-    builder.button(text="6M=250$", callback_data="with_chat_3m")
+    builder.button(text="1M=50$", callback_data="with_chat_1m")
+    builder.button(text="3M=130$", callback_data="with_chat_3m")
+    builder.button(text="6M=250$", callback_data="with_chat_6m")
     builder.button(text="1Y=490$", callback_data="with_chat_1y")
     builder.button(text="Навсегда=1500$", callback_data="with_chat_lt")
     builder.button(text="Назад", callback_data="back_to_main")
@@ -30,9 +30,9 @@ def get_without_chat_inline_keyboard():
     Inline-клавиатура для выбора тарифа 'Без чата'.
     """
     builder = InlineKeyboardBuilder()
-    builder.button(text="1M=25$", callback_data="without_chat_1w")
-    builder.button(text="3M=65$", callback_data="without_chat_1m")
-    builder.button(text="6M=125$", callback_data="without_chat_3m")
+    builder.button(text="1M=25$", callback_data="without_chat_1m")
+    builder.button(text="3M=65$", callback_data="without_chat_3m")
+    builder.button(text="6M=125$", callback_data="without_chat_6m")
     builder.button(text="1Y=245$", callback_data="without_chat_1y")
     builder.button(text="Навсегда=750$", callback_data="without_chat_lt")
     builder.button(text="Назад", callback_data="back_to_main")
