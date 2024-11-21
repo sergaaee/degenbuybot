@@ -26,8 +26,9 @@ dp = Dispatcher()
 async def main():
     # Инициализация
     from callbacks import router
+    from routers import payments_router
     init_db()
-    dp.include_router(router)
+    dp.include_routers(router, payments_router)
 
     # Запуск проверки подписок
     asyncio.create_task(check_expired_subscriptions(session, bot))
