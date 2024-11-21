@@ -6,7 +6,8 @@ import os
 from aiogram import Router
 
 from api_calls import get_ton_balance, get_usdt_bnb_balance, get_bnb_balance, get_base_usdc_balance, \
-    get_base_eth_balance, get_usdt_trx_balance, get_trx_balance
+    get_base_eth_balance, get_usdt_trx_balance, get_trx_balance, get_sol_balance, get_sol_usd_rate, get_ton_usd_rate, \
+    get_bnb_usd_rate, get_eth_usd_rate, get_trx_usd_rate
 from crud.subscriptions import extend_subscription, create_subscription
 from crud.transactions import get_transaction_by_telegram_id, create_transaction
 from crud.users import get_user_by_telegram_id
@@ -22,11 +23,18 @@ from dotenv import load_dotenv
 from constants import *
 
 load_dotenv()
-sol_wallet_address = os.environ.get("SOL_WALLET_ADDRESS")
-usdt_sol_mint_address = os.environ.get("USDT_SOL_MINT_ADDRESS")
-ton_wallet_address = os.environ.get("TON_WALLET_ADDRESS")
-bsc_wallet_address = os.environ.get("BSC_WALLET_ADDRESS")
-tron_wallet_address = os.environ.get("TRON_WALLET_ADDRESS")
+
+CURRENCY_HANDLERS = {
+    "SOL": ("SOL", "SOL", lambda: get_sol_balance(), get_sol_usd_rate),
+    "TON": ("TON", "TON", lambda: get_ton_balance(), get_ton_usd_rate),
+    "BNB": ("BSC", "BNB", lambda: get_bnb_balance(), get_bnb_usd_rate),
+    "USDTSOL": ("SOL", "USDT", lambda: get_sol_balance(), lambda: 1),
+    "USDTBNB": ("BSC", "USDT", lambda: get_usdt_bnb_balance(), lambda: 1),
+    "ETHBASE": ("Base", "ETH", lambda: get_base_eth_balance(), get_eth_usd_rate),
+    "USDCBASE": ("Base", "USDC", lambda: get_base_usdc_balance(), lambda: 1),
+    "TRX": ("TRON", "TRX", lambda: get_trx_balance(), get_trx_usd_rate),
+    "USDTTRON": ("TRON", "USDT", lambda: get_usdt_trx_balance(), lambda: 1),
+}
 
 payments_router = Router()  # Создаем роутер для всех обработчиков
 
@@ -52,8 +60,13 @@ async def tariff_callback(callback: CallbackQuery) -> None:
     period = callback.data.split("_")[-1]  # Например, "1w", "1m", "3m"
 
     # Определяем цену
-    base_prices = BASE_PRICES
-
+    base_prices = {
+        "1m": 50,  # Базовая цена "С чатом" за месяц
+        "3m": 130,  # Базовая цена "С чатом" за три месяца
+        "6m": 250,
+        "1y": 490,
+        "lt": 1500,
+    }
     amount = base_prices.get(period, 0) / 2 if not is_with_chat else base_prices.get(period, 0)
 
     subscription_type = "С чатом" if is_with_chat else "Без чата"
@@ -75,48 +88,39 @@ async def tariff_callback(callback: CallbackQuery) -> None:
     )
 
 
-@payments_router.callback_query(F.data == "pay_in_SOL")
-async def pay_in_sol_callback(callback: CallbackQuery) -> None:
-    user_id = callback.from_user.id
-    transaction = get_transaction_by_telegram_id(session, user_id)
+def calculate_expected_amount(transaction, balance_func, rate_func):
+    rate = rate_func()
+    if rate <= 0:
+        raise ValueError("Не удалось получить курс валюты.")
 
-    if not transaction or transaction.currency:
-        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
-        return
+    price_in_usd = transaction.expected_amount
+    price_in_currency = price_in_usd / rate
 
-    from api_calls import get_sol_balance, get_sol_usd_rate
+    current_balance = balance_func()
+    expected_amount = current_balance + price_in_currency
 
-    # Получаем текущий курс SOL/USD
-    sol_usd_rate = get_sol_usd_rate()
-    if sol_usd_rate <= 0:
-        await callback.message.edit_text("Не удалось получить курс SOL/USD. Попробуйте позже.")
-        return
+    return expected_amount, rate
 
-    # Конвертируем цену подписки в SOL
-    price_in_usd = transaction.expected_amount  # Стоимость подписки в USD
-    price_in_sol = price_in_usd / sol_usd_rate  # Конвертируем в SOL
 
-    # Получаем текущий баланс кошелька
-    current_balance = get_sol_balance()
-    expected_amount = current_balance + price_in_sol  # Баланс + стоимость в SOL
-
-    # Обновляем транзакцию
-    transaction.currency = "SOL"
-    transaction.blockchain = "Solana"
-    transaction.expected_amount = expected_amount  # Ожидаемая сумма в SOL
+def update_transaction(session, transaction, blockchain, currency, expected_amount):
+    transaction.blockchain = blockchain
+    transaction.currency = currency
+    transaction.expected_amount = expected_amount
     session.commit()
 
+
+async def send_payment_instruction(callback, expected_amount, rate, address, currency):
     await callback.message.edit_text(
-        f"Пополните кошелек минимум на {expected_amount - current_balance:.6f} SOL.\n"
-        f"Текущий курс: 1 SOL = ${sol_usd_rate:.2f}\n\n"
-        f"Адрес: `{sol_wallet_address}`",
+        f"Пополните кошелек минимум на {expected_amount:.6f} {currency}.\n"
+        f"Текущий курс: 1 {currency} = ${rate:.2f}\n\n"
+        f"Адрес: `{address}`",
         reply_markup=get_check_payment_keyboard(cancel_button=True),
         parse_mode="Markdown"
     )
 
 
-@payments_router.callback_query(F.data == "pay_in_TON")
-async def pay_in_ton_callback(callback: CallbackQuery) -> None:
+@payments_router.callback_query(F.data.startswith("pay_in_"))
+async def handle_payment(callback: CallbackQuery):
     user_id = callback.from_user.id
     transaction = get_transaction_by_telegram_id(session, user_id)
 
@@ -124,61 +128,27 @@ async def pay_in_ton_callback(callback: CallbackQuery) -> None:
         await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
         return
 
-    from api_calls import get_ton_balance, get_ton_usd_rate
+    currency_key = callback.data.split("_")[-1]
+    print(currency_key)
+    handler = CURRENCY_HANDLERS.get(currency_key)
 
-    # Получаем текущий курс SOL/USD
-    ton_usd_rate = get_ton_usd_rate()
-    if ton_usd_rate <= 0:
-        await callback.message.edit_text("Не удалось получить курс TON/USD. Попробуйте позже.")
+    if not handler:
+        await callback.message.edit_text("Неизвестная валюта.")
         return
 
-    # Конвертируем цену подписки в ton
-    price_in_usd = transaction.expected_amount  # Стоимость подписки в USD
-    price_in_ton = price_in_usd / ton_usd_rate  # Конвертируем в ton
+    blockchain, currency, balance_func, rate_func = handler
 
-    # Получаем текущий баланс кошелька
-    current_balance = get_ton_balance()
-    expected_amount = current_balance + price_in_ton  # Баланс + стоимость в ton
-
-    # Обновляем транзакцию
-    transaction.currency = "TON"
-    transaction.blockchain = "TON"
-    transaction.expected_amount = expected_amount  # Ожидаемая сумма в ton
-    session.commit()
-
-    await callback.message.edit_text(
-        f"Пополните кошелек минимум на {expected_amount - current_balance:.6f} TON.\n"
-        f"Текущий курс: 1 TON = ${ton_usd_rate:.2f}\n\n"
-        f"Адрес: `{ton_wallet_address}`",
-        reply_markup=get_check_payment_keyboard(cancel_button=True),
-        parse_mode="Markdown"
-    )
-
-
-@payments_router.callback_query(F.data == "pay_in_USDT_SOL")
-async def pay_in_usdt_sol_callback(callback: CallbackQuery) -> None:
-    user_id = callback.from_user.id
-    transaction = get_transaction_by_telegram_id(session, user_id)
-
-    if not transaction or transaction.currency:
-        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
+    try:
+        expected_amount, rate = calculate_expected_amount(transaction, balance_func, rate_func)
+    except ValueError as e:
+        await callback.message.edit_text(str(e))
         return
 
-    from api_calls import get_sol_token_balances
+    wallet_address = os.environ.get(f"{blockchain.upper()}_WALLET_ADDRESS")
+    update_transaction(session, transaction, blockchain, currency, expected_amount)
 
-    token_balances = get_sol_token_balances()
-    current_balance = token_balances.get(usdt_sol_mint_address, 0)
-    expected_amount = current_balance + transaction.expected_amount  # Баланс + стоимость тарифа
-
-    transaction.currency = "USDT"
-    transaction.blockchain = "Solana"
-    transaction.expected_amount = expected_amount  # Обновляем ожидаемую сумму
-    session.commit()
-
-    await callback.message.edit_text(
-        f"Пополните кошелек минимум на {expected_amount - current_balance:.2f} USDT.\n\nАдрес: `{sol_wallet_address}`",
-        reply_markup=get_check_payment_keyboard(cancel_button=True),
-        parse_mode="Markdown",
+    await send_payment_instruction(
+        callback, expected_amount - balance_func(), rate, wallet_address, currency
     )
 
 
@@ -199,192 +169,6 @@ async def cancel_payment_callback(callback: CallbackQuery) -> None:
         await callback.message.edit_text("Активная заявка на оплату не найдена.")
 
 
-@payments_router.callback_query(F.data == "pay_in_BNB")
-async def pay_in_bnb_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    transaction = get_transaction_by_telegram_id(session, user_id)
-
-    if not transaction or transaction.currency:
-        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
-        return
-
-    from api_calls import get_bnb_balance, get_bnb_usd_rate
-
-    bnb_usd_rate = get_bnb_usd_rate()
-    if bnb_usd_rate <= 0:
-        await callback.message.edit_text("Не удалось получить курс BNB/USD. Попробуйте позже.")
-        return
-
-    price_in_usd = transaction.expected_amount
-    price_in_bnb = price_in_usd / bnb_usd_rate
-
-    current_balance = get_bnb_balance()
-    expected_amount = current_balance + price_in_bnb
-
-    transaction.currency = "BNB"
-    transaction.blockchain = "BSC"
-    transaction.expected_amount = expected_amount
-    session.commit()
-
-    await callback.message.edit_text(
-        f"Пополните кошелек минимум на {expected_amount - current_balance:.6f} BNB.\n"
-        f"Текущий курс: 1 BNB = ${bnb_usd_rate:.2f}\n\n"
-        f"Адрес: `{bsc_wallet_address}`",
-        reply_markup=get_check_payment_keyboard(cancel_button=True),
-        parse_mode="Markdown"
-    )
-
-
-@payments_router.callback_query(F.data == "pay_in_USDT_BNB")
-async def pay_in_usdt_bnb_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    transaction = get_transaction_by_telegram_id(session, user_id)
-
-    if not transaction or transaction.currency:
-        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
-        return
-
-    from api_calls import get_usdt_bnb_balance
-
-    current_balance = get_usdt_bnb_balance()
-    expected_amount = current_balance + transaction.expected_amount
-
-    transaction.currency = "USDT"
-    transaction.blockchain = "BSC"
-    transaction.expected_amount = expected_amount
-    session.commit()
-
-    await callback.message.edit_text(
-        f"Пополните кошелек минимум на {expected_amount - current_balance:.2f} USDT.\n\nАдрес: `{bsc_wallet_address}`",
-        reply_markup=get_check_payment_keyboard(cancel_button=True),
-        parse_mode="Markdown"
-    )
-
-
-@payments_router.callback_query(F.data == "pay_in_ETH_BASE")
-async def pay_in_eth_base_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    transaction = get_transaction_by_telegram_id(session, user_id)
-
-    if not transaction or transaction.currency:
-        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
-        return
-
-    from api_calls import get_base_eth_balance, get_eth_usd_rate
-
-    eth_usd_rate = get_eth_usd_rate()
-    if eth_usd_rate <= 0:
-        await callback.message.edit_text("Не удалось получить курс ETH/USD. Попробуйте позже.")
-        return
-
-    price_in_usd = transaction.expected_amount
-    price_in_eth = price_in_usd / eth_usd_rate
-
-    current_balance = get_base_eth_balance()
-    expected_amount = current_balance + price_in_eth
-
-    transaction.currency = "ETH"
-    transaction.blockchain = "Base"
-    transaction.expected_amount = expected_amount
-    session.commit()
-
-    await callback.message.edit_text(
-        f"Пополните кошелек минимум на {expected_amount - current_balance:.6f} ETH.\n"
-        f"Текущий курс: 1 ETH = ${eth_usd_rate:.2f}\n\n"
-        f"Адрес: `{os.environ.get('BASE_WALLET_ADDRESS')}`",
-        reply_markup=get_check_payment_keyboard(cancel_button=True),
-        parse_mode="Markdown"
-    )
-
-
-@payments_router.callback_query(F.data == "pay_in_USDC_BASE")
-async def pay_in_usdc_base_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    transaction = get_transaction_by_telegram_id(session, user_id)
-
-    if not transaction or transaction.currency:
-        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
-        return
-
-    from api_calls import get_base_usdc_balance
-
-    current_balance = get_base_usdc_balance()
-    expected_amount = current_balance + transaction.expected_amount
-
-    transaction.currency = "USDC"
-    transaction.blockchain = "Base"
-    transaction.expected_amount = expected_amount
-    session.commit()
-
-    await callback.message.edit_text(
-        f"Пополните кошелек минимум на {expected_amount - current_balance:.2f} USDC.\n\nАдрес: `{os.environ.get('BASE_WALLET_ADDRESS')}`",
-        reply_markup=get_check_payment_keyboard(cancel_button=True),
-        parse_mode="Markdown"
-    )
-
-
-@payments_router.callback_query(F.data == "pay_in_TRX")
-async def pay_in_trx_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    transaction = get_transaction_by_telegram_id(session, user_id)
-
-    if not transaction or transaction.currency:
-        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
-        return
-
-    from api_calls import get_trx_balance, get_trx_usd_rate
-
-    trx_usd_rate = get_trx_usd_rate()
-    if trx_usd_rate <= 0:
-        await callback.message.edit_text("Не удалось получить курс TRX/USD. Попробуйте позже.")
-        return
-
-    price_in_usd = transaction.expected_amount
-    price_in_trx = price_in_usd / trx_usd_rate
-
-    current_balance = get_trx_balance()
-    expected_amount = current_balance + price_in_trx
-
-    transaction.currency = "TRX"
-    transaction.blockchain = "TRON"
-    transaction.expected_amount = expected_amount
-    session.commit()
-
-    await callback.message.edit_text(
-        f"Пополните кошелек минимум на {expected_amount - current_balance:.6f} TRX.\n"
-        f"Текущий курс: 1 TRX = ${trx_usd_rate:.2f}\n\n"
-        f"Адрес: `{tron_wallet_address}`",
-        reply_markup=get_check_payment_keyboard(cancel_button=True),
-        parse_mode="Markdown"
-    )
-
-
-@payments_router.callback_query(F.data == "pay_in_USDT_TRON")
-async def pay_in_usdt_tron_callback(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    transaction = get_transaction_by_telegram_id(session, user_id)
-
-    if not transaction or transaction.currency:
-        await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
-        return
-
-    from api_calls import get_usdt_trx_balance
-
-    current_balance = get_usdt_trx_balance()
-    expected_amount = current_balance + transaction.expected_amount
-
-    transaction.currency = "USDT"
-    transaction.blockchain = "TRON"
-    transaction.expected_amount = expected_amount
-    session.commit()
-
-    await callback.message.edit_text(
-        f"Пополните кошелек минимум на {expected_amount - current_balance:.2f} USDT.\n\nАдрес: `{tron_wallet_address}`",
-        reply_markup=get_check_payment_keyboard(cancel_button=True),
-        parse_mode="Markdown"
-    )
-
-
 @payments_router.callback_query(F.data == "check_payment")
 async def check_payment_callback(callback: CallbackQuery) -> None:
     user_id = callback.from_user.id
@@ -394,12 +178,11 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
         await callback.message.edit_text("Не найдена активная транзакция для проверки.")
         return
 
-    from api_calls import get_sol_balance, get_sol_token_balances
+    from api_calls import get_sol_balance, get_sol_usdt_balance
     if transaction.currency == "SOL":
         current_balance = get_sol_balance()
-    elif transaction.blockchain == "Solana" and transaction.currency == "USDT":
-        token_balances = get_sol_token_balances()
-        current_balance = token_balances.get(usdt_sol_mint_address, 0)
+    elif transaction.blockchain == "SOL" and transaction.currency == "USDT":
+        current_balance = get_sol_usdt_balance()
     elif transaction.currency == "TON":
         current_balance = get_ton_balance()
     elif transaction.blockchain == "BSC" and transaction.currency == "USDT":
@@ -420,7 +203,7 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
 
         # Если у пользователя есть пригласивший, продлеваем подписку пригласившему
         if user.invited_by:
-            updated_subscription = extend_subscription(session, user.invited_by)
+            extend_subscription(session, user.invited_by)
             await bot.send_message(chat_id=user.invited_by, text="Ваша подписка была продлена благодаря рефералу!")
 
         # Обновляем статус транзакции
@@ -428,16 +211,12 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
         session.commit()
 
         # Определяем тип подписки
-        subscription_type = "Без чата" if not transaction.with_chat else "С чатом"  # Пример определения
+        subscription_type = "Без чата" if not transaction.with_chat else "С чатом"
 
         # Создаем подписку
         subscription = create_subscription(session, user_id, subscription_type)
 
-        try:
-            await bot.unban_chat_member(CHAT_ID, user_id)
-        except Exception:
-            pass
-
+        # Отправляем ссылку на чат, если подписка "С чатом"
         invite_link = await bot.create_chat_invite_link(CHAT_ID, expire_date=None, member_limit=1)
         if subscription_type == "С чатом":
             await callback.message.edit_text(

@@ -23,7 +23,7 @@ def get_sol_balance():
     return 0
 
 
-def get_sol_token_balances():
+def get_sol_usdt_balance():
     """
     Получение баланса всех токенов, привязанных к указанному кошельку.
     """
@@ -47,7 +47,7 @@ def get_sol_token_balances():
             token_amount = token_info.get("info", {}).get("tokenAmount", {})
             token_mint = token_info.get("info", {}).get("mint", "Unknown")
             token_balances[token_mint] = float(token_amount.get("uiAmount", 0))
-        return token_balances
+        return token_balances.get("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB")
     return {}
 
 
