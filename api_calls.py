@@ -233,3 +233,4 @@ def get_trx_usd_rate():
     if response.status_code == 200:
         return response.json().get("tron", {}).get("usd", 1)
     return -1
+

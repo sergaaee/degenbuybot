@@ -31,6 +31,8 @@ class Transaction(Base):
     period = Column(String, nullable=True)
     referral_code = Column(String, nullable=True)
     with_chat = Column(Boolean, nullable=False, default=False)
+    tx_id = Column(String, unique=True, nullable=True)
+    wallet_address = Column(String, nullable=True)
 
 
 class Subscription(Base):

@@ -71,23 +71,6 @@ async def command_start_handler(message: Message):
         parse_mode=ParseMode.MARKDOWN_V2
     )
 
-
-@router.callback_query(F.data == "with_chat")
-async def with_chat_callback(callback: CallbackQuery) -> None:
-    await callback.message.edit_text(
-        "Выберите период:",
-        reply_markup=get_with_chat_inline_keyboard(),
-    )
-
-
-@router.callback_query(F.data == "without_chat")
-async def without_chat_callback(callback: CallbackQuery) -> None:
-    await callback.message.edit_text(
-        "Выберите период:",
-        reply_markup=get_without_chat_inline_keyboard(),
-    )
-
-
 @router.callback_query(F.data == "back_to_main")
 async def back_to_main_callback(callback: CallbackQuery) -> None:
     await callback.message.edit_text(

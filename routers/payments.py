@@ -14,11 +14,13 @@ from crud.users import get_user_by_telegram_id
 from aiogram import F
 from aiogram.types import CallbackQuery
 from keyboards import (
-    get_check_payment_keyboard, get_currency_selection_keyboard,
+    get_check_payment_keyboard, get_currency_selection_keyboard, get_with_chat_inline_keyboard,
+    get_without_chat_inline_keyboard,
 
 )
 from main import bot, session
 from dotenv import load_dotenv
+from new_api_calls import validate_payment
 
 from constants import *
 
@@ -76,7 +78,7 @@ async def tariff_callback(callback: CallbackQuery) -> None:
         session=session,
         telegram_id=user_id,
         blockchain="",  # Укажите конкретную блокчейн-сеть
-        expected_amount=amount,
+        base_price=amount,
         currency="",  # Валюта будет выбрана позже
         with_chat=is_with_chat,
         period=period,
@@ -85,6 +87,22 @@ async def tariff_callback(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
         f"Вы выбрали подписку '{subscription_type}' на {period}. Стоимость: USD{amount}.\nВыберите валюту для оплаты.",
         reply_markup=get_currency_selection_keyboard()
+    )
+
+
+@payments_router.callback_query(F.data == "with_chat")
+async def with_chat_callback(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        "Выберите период:",
+        reply_markup=get_with_chat_inline_keyboard(),
+    )
+
+
+@payments_router.callback_query(F.data == "without_chat")
+async def without_chat_callback(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        "Выберите период:",
+        reply_markup=get_without_chat_inline_keyboard(),
     )
 
 
@@ -102,20 +120,25 @@ def calculate_expected_amount(transaction, balance_func, rate_func):
     return expected_amount, rate
 
 
-def update_transaction(session, transaction, blockchain, currency, expected_amount):
+def update_transaction(session, transaction, blockchain, currency, expected_amount, wallet_address):
     transaction.blockchain = blockchain
     transaction.currency = currency
+    transaction.wallet_address = wallet_address
     transaction.expected_amount = expected_amount
     session.commit()
 
 
-async def send_payment_instruction(callback, expected_amount, rate, address, currency):
+async def send_payment_instruction(callback, transaction, wallet_address):
+    """
+    Отправка пользователю инструкции по оплате.
+    """
     await callback.message.edit_text(
-        f"Пополните кошелек минимум на {expected_amount:.6f} {currency}.\n"
-        f"Текущий курс: 1 {currency} = ${rate:.2f}\n\n"
-        f"Адрес: `{address}`",
+        f"Для завершения оплаты, отправьте точную сумму: {transaction.expected_amount:.6f} {transaction.currency}\n"
+        f"на адрес:\n\n"
+        f"`{wallet_address}`\n\n"
+        f"Убедитесь, что сумма указана точно, иначе платеж не будет подтвержден.",
+        parse_mode="Markdown",
         reply_markup=get_check_payment_keyboard(cancel_button=True),
-        parse_mode="Markdown"
     )
 
 
@@ -145,10 +168,10 @@ async def handle_payment(callback: CallbackQuery):
         return
 
     wallet_address = os.environ.get(f"{blockchain.upper()}_WALLET_ADDRESS")
-    update_transaction(session, transaction, blockchain, currency, expected_amount)
+    update_transaction(session, transaction, blockchain, currency, expected_amount, wallet_address)
 
     await send_payment_instruction(
-        callback, expected_amount - balance_func(), rate, wallet_address, currency
+        callback, transaction, wallet_address
     )
 
 
@@ -198,7 +221,9 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
     elif transaction.blockchain == "TRON" and transaction.currency == "TRX":
         current_balance = get_trx_balance()
 
-    if current_balance >= transaction.expected_amount:
+    print(validate_payment(transaction))
+
+    if current_balance >= transaction.expected_amount - transaction.expected_amount * 0.01:
         user = get_user_by_telegram_id(session, user_id)
 
         # Если у пользователя есть пригласивший, продлеваем подписку пригласившему
