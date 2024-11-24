@@ -5,8 +5,7 @@ import os
 
 from aiogram import Router
 
-from api_calls import get_ton_balance, get_usdt_bnb_balance, get_bnb_balance, get_base_usdc_balance, \
-    get_base_eth_balance, get_usdt_trx_balance, get_trx_balance, get_sol_balance, get_sol_usd_rate, get_ton_usd_rate, \
+from api_calls import get_sol_usd_rate, get_ton_usd_rate, \
     get_bnb_usd_rate, get_eth_usd_rate, get_trx_usd_rate
 from crud.subscriptions import extend_subscription, create_subscription
 from crud.transactions import get_transaction_by_telegram_id, create_transaction
@@ -20,22 +19,21 @@ from keyboards import (
 )
 from main import bot, session
 from dotenv import load_dotenv
-from new_api_calls import validate_payment
+from api_calls import validate_payment
 
 from constants import *
 
 load_dotenv()
 
 CURRENCY_HANDLERS = {
-    "SOL": ("SOL", "SOL", lambda: get_sol_balance(), get_sol_usd_rate),
-    "TON": ("TON", "TON", lambda: get_ton_balance(), get_ton_usd_rate),
-    "BNB": ("BSC", "BNB", lambda: get_bnb_balance(), get_bnb_usd_rate),
-    "USDTSOL": ("SOL", "USDT", lambda: get_sol_balance(), lambda: 1),
-    "USDTBNB": ("BSC", "USDT", lambda: get_usdt_bnb_balance(), lambda: 1),
-    "ETHBASE": ("Base", "ETH", lambda: get_base_eth_balance(), get_eth_usd_rate),
-    "USDCBASE": ("Base", "USDC", lambda: get_base_usdc_balance(), lambda: 1),
-    "TRX": ("TRON", "TRX", lambda: get_trx_balance(), get_trx_usd_rate),
-    "USDTTRON": ("TRON", "USDT", lambda: get_usdt_trx_balance(), lambda: 1),
+    "SOL": ("SOL", "SOL", get_sol_usd_rate),
+    "TON": ("TON", "TON", get_ton_usd_rate),
+    "BNB": ("BSC", "BNB", get_bnb_usd_rate),
+    "USDTBNB": ("BSC", "USDT", lambda: 1),
+    "ETHBASE": ("Base", "ETH", get_eth_usd_rate),
+    "USDCBASE": ("Base", "USDC", lambda: 1),
+    "TRX": ("TRON", "TRX", get_trx_usd_rate),
+    "USDTTRON": ("TRON", "USDT", lambda: 1),
 }
 
 payments_router = Router()  # Создаем роутер для всех обработчиков
@@ -71,7 +69,7 @@ async def tariff_callback(callback: CallbackQuery) -> None:
     }
     amount = base_prices.get(period, 0) / 2 if not is_with_chat else base_prices.get(period, 0)
 
-    subscription_type = "С чатом" if is_with_chat else "Без чата"
+    subscription_type = "с возможность писать" if is_with_chat else "без возможности писать"
 
     # Создаём транзакцию
     create_transaction(
@@ -84,8 +82,16 @@ async def tariff_callback(callback: CallbackQuery) -> None:
         period=period,
     )
 
+    str_period = {
+        "1m": "1 месяц",
+        "3m": "3 месяца",
+        "6m": "полгода",
+        "1y": "год",
+        "lt": "вечно",
+    }
+
     await callback.message.edit_text(
-        f"Вы выбрали подписку '{subscription_type}' на {period}. Стоимость: USD{amount}.\nВыберите валюту для оплаты.",
+        f"Вы выбрали подписку {subscription_type} на {str_period.get(period)}. Стоимость: USD {amount}.\nВыберите валюту для оплаты.",
         reply_markup=get_currency_selection_keyboard()
     )
 
@@ -106,24 +112,25 @@ async def without_chat_callback(callback: CallbackQuery) -> None:
     )
 
 
-def calculate_expected_amount(transaction, balance_func, rate_func):
+def calculate_expected_amount(transaction, rate_func):
     rate = rate_func()
     if rate <= 0:
         raise ValueError("Не удалось получить курс валюты.")
 
     price_in_usd = transaction.expected_amount
+    print(price_in_usd)
+    print(rate)
     price_in_currency = price_in_usd / rate
+    print(price_in_currency)
 
-    current_balance = balance_func()
-    expected_amount = current_balance + price_in_currency
+    expected_amount = price_in_currency
 
     return expected_amount, rate
 
 
-def update_transaction(session, transaction, blockchain, currency, expected_amount, wallet_address):
+def update_transaction(session, transaction, blockchain, currency, expected_amount):
     transaction.blockchain = blockchain
     transaction.currency = currency
-    transaction.wallet_address = wallet_address
     transaction.expected_amount = expected_amount
     session.commit()
 
@@ -147,28 +154,27 @@ async def handle_payment(callback: CallbackQuery):
     user_id = callback.from_user.id
     transaction = get_transaction_by_telegram_id(session, user_id)
 
-    if not transaction or transaction.currency:
+    if not transaction:
         await callback.message.edit_text("Активная транзакция не найдена или уже выбрана валюта.")
         return
 
     currency_key = callback.data.split("_")[-1]
-    print(currency_key)
     handler = CURRENCY_HANDLERS.get(currency_key)
 
     if not handler:
         await callback.message.edit_text("Неизвестная валюта.")
         return
 
-    blockchain, currency, balance_func, rate_func = handler
+    blockchain, currency, rate_func = handler
 
     try:
-        expected_amount, rate = calculate_expected_amount(transaction, balance_func, rate_func)
+        expected_amount, rate = calculate_expected_amount(transaction, rate_func)
     except ValueError as e:
         await callback.message.edit_text(str(e))
         return
 
     wallet_address = os.environ.get(f"{blockchain.upper()}_WALLET_ADDRESS")
-    update_transaction(session, transaction, blockchain, currency, expected_amount, wallet_address)
+    update_transaction(session, transaction, blockchain, currency, expected_amount)
 
     await send_payment_instruction(
         callback, transaction, wallet_address
@@ -185,7 +191,7 @@ async def cancel_payment_callback(callback: CallbackQuery) -> None:
 
     if transaction and transaction.status == "Pending":
         # Удаляем транзакцию из базы
-        session.delete(transaction)
+        transaction.status = "Canceled"
         session.commit()
         await callback.message.edit_text("Оплата отменена.")
     else:
@@ -201,29 +207,7 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
         await callback.message.edit_text("Не найдена активная транзакция для проверки.")
         return
 
-    from api_calls import get_sol_balance, get_sol_usdt_balance
-    if transaction.currency == "SOL":
-        current_balance = get_sol_balance()
-    elif transaction.blockchain == "SOL" and transaction.currency == "USDT":
-        current_balance = get_sol_usdt_balance()
-    elif transaction.currency == "TON":
-        current_balance = get_ton_balance()
-    elif transaction.blockchain == "BSC" and transaction.currency == "USDT":
-        current_balance = get_usdt_bnb_balance()
-    elif transaction.blockchain == "BSC" and transaction.currency == "BNB":
-        current_balance = get_bnb_balance()
-    elif transaction.blockchain == "Base" and transaction.currency == "USDC":
-        current_balance = get_base_usdc_balance()
-    elif transaction.blockchain == "Base" and transaction.currency == "ETH":
-        current_balance = get_base_eth_balance()
-    elif transaction.blockchain == "TRON" and transaction.currency == "USDT":
-        current_balance = get_usdt_trx_balance()
-    elif transaction.blockchain == "TRON" and transaction.currency == "TRX":
-        current_balance = get_trx_balance()
-
-    print(validate_payment(transaction))
-
-    if current_balance >= transaction.expected_amount - transaction.expected_amount * 0.01:
+    if validate_payment(transaction):
         user = get_user_by_telegram_id(session, user_id)
 
         # Если у пользователя есть пригласивший, продлеваем подписку пригласившему
@@ -231,15 +215,12 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
             extend_subscription(session, user.invited_by)
             await bot.send_message(chat_id=user.invited_by, text="Ваша подписка была продлена благодаря рефералу!")
 
-        # Обновляем статус транзакции
-        transaction.status = "Success"
-        session.commit()
-
         # Определяем тип подписки
         subscription_type = "Без чата" if not transaction.with_chat else "С чатом"
 
         # Создаем подписку
         subscription = create_subscription(session, user_id, subscription_type)
+        session.commit()
 
         # Отправляем ссылку на чат, если подписка "С чатом"
         invite_link = await bot.create_chat_invite_link(CHAT_ID, expire_date=None, member_limit=1)

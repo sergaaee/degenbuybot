@@ -1,3 +1,15 @@
+import asyncio
+import time
+from abc import ABC, abstractmethod
+import os
+import requests
+from dotenv import load_dotenv
+from requests import HTTPError
+
+from main import session
+
+load_dotenv()
+
 import requests
 import os
 from dotenv import load_dotenv
@@ -9,76 +21,11 @@ ton_wallet_address = os.environ.get("TON_WALLET_ADDRESS")
 tron_wallet_address = os.environ.get('TRON_WALLET_ADDRESS')
 
 
-def get_sol_balance():
-    url = "https://api.mainnet-beta.solana.com"
-    data = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getBalance",
-        "params": [sol_wallet_address]
-    }
-    response = requests.post(url, json=data)
-    if response.status_code == 200:
-        return response.json().get("result", {}).get("value", 0) / 1e9
-    return 0
-
-
-def get_sol_usdt_balance():
-    """
-    Получение баланса всех токенов, привязанных к указанному кошельку.
-    """
-    url = "https://api.mainnet-beta.solana.com"
-    data = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getTokenAccountsByOwner",
-        "params": [
-            sol_wallet_address,
-            {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},  # Программа токенов SPL
-            {"encoding": "jsonParsed"}
-        ]
-    }
-    response = requests.post(url, json=data)
-    if response.status_code == 200:
-        result = response.json().get("result", {}).get("value", [])
-        token_balances = {}
-        for token_account in result:
-            token_info = token_account.get("account", {}).get("data", {}).get("parsed", {})
-            token_amount = token_info.get("info", {}).get("tokenAmount", {})
-            token_mint = token_info.get("info", {}).get("mint", "Unknown")
-            token_balances[token_mint] = float(token_amount.get("uiAmount", 0))
-        return token_balances.get("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB")
-    return {}
-
-
 def get_sol_usd_rate():
     response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
     if response.status_code == 200:
         return response.json().get("solana", {}).get("usd", 1)
     return -1
-
-
-def get_ton_balance():
-    url = f"https://toncenter.com/api/v2/getAddressInformation"
-    params = {
-        "address": ton_wallet_address,
-        "api_key": os.environ.get("TON_API_KEY"),
-    }
-    try:
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
-
-        if data.get("ok"):
-            # Баланс возвращается в нанотонах, конвертируем в TON
-            balance_in_ton = int(data["result"]["balance"]) / 10 ** 9
-            return balance_in_ton
-        else:
-            raise ValueError(f"Ошибка в API: {data.get('error')}")
-    except requests.RequestException as e:
-        raise SystemExit(f"Ошибка соединения: {e}")
-    except ValueError as e:
-        raise SystemExit(f"Ошибка данных: {e}")
 
 
 def get_ton_usd_rate():
@@ -104,80 +51,11 @@ def get_ton_usd_rate():
         raise SystemExit(f"Ошибка данных: {e}")
 
 
-def get_bnb_balance():
-    url = f"https://api.bscscan.com/api"
-    params = {
-        "module": "account",
-        "action": "balance",
-        "address": bsc_wallet_address,
-        "apikey": os.environ.get("BSC_API_KEY"),
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        balance_wei = int(response.json().get("result", 0))
-        return balance_wei / 1e18  # Конвертируем из Wei в BNB
-    return -1
-
-
 def get_bnb_usd_rate():
     response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=binancecoin&vs_currencies=usd")
     if response.status_code == 200:
         return response.json().get("binancecoin", {}).get("usd", 1)
     return -1
-
-
-def get_usdt_bnb_balance():
-    # Получаем баланс USDT через BSC API
-    url = f"https://api.bscscan.com/api"
-    params = {
-        "module": "account",
-        "action": "tokenbalance",
-        "contractaddress": "0x55d398326f99059ff775485246999027b3197955",  # Укажите контракт USDT на BSC
-        "address": bsc_wallet_address,
-        "apikey": os.environ.get("BSC_API_KEY"),
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        balance_wei = int(response.json().get("result", 0))
-        return balance_wei / 1e18  # Конвертируем из Wei в USDT
-    return -1
-
-
-def get_base_eth_balance():
-    """
-    Получение баланса ETH на сети Base.
-    """
-    url = f"https://api.basescan.org/api"
-    params = {
-        "module": "account",
-        "action": "balance",
-        "address": os.environ.get("BASE_WALLET_ADDRESS"),
-        "apikey": os.environ.get("BASE_API_KEY"),
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        balance_wei = int(response.json().get("result", 0))
-        return balance_wei / 1e18  # Конвертация из Wei в ETH
-    return 0
-
-
-def get_base_usdc_balance():
-    """
-    Получение баланса USDC на сети Base.
-    """
-    url = f"https://api.basescan.org/api"
-    params = {
-        "module": "account",
-        "action": "tokenbalance",
-        "contractaddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",  # Укажите адрес контракта USDC в сети Base
-        "address": os.environ.get("BASE_WALLET_ADDRESS"),
-        "apikey": os.environ.get("BASE_API_KEY"),
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        balance_wei = int(response.json().get("result", 0))
-        return balance_wei / 1e6  # Конвертация из минимальной единицы в USDC
-    return 0
 
 
 def get_eth_usd_rate():
@@ -190,41 +68,6 @@ def get_eth_usd_rate():
     return -1
 
 
-def get_trx_balance():
-    """
-    Получение баланса TRX на сети TRON.
-    """
-    url = f"https://apilist.tronscanapi.com/api/account"
-    params = {
-        "address": tron_wallet_address,
-        "apikey": os.environ.get("TRON_API_KEY"),
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        result = response.json()
-        if result and "balance" in result:
-            return result["balance"] / 1e6  # Конвертируем из Sun в TRX
-    return 0
-
-
-def get_usdt_trx_balance():
-    """
-    Получение баланса USDT на сети TRON.
-    """
-    url = f"https://apilist.tronscanapi.com/api/account/tokens"
-    params = {
-        "address": tron_wallet_address,
-        "apikey": os.environ.get("TRON_API_KEY"),
-    }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        result = response.json()
-        for token in result.get("tokens", []):
-            if token.get("tokenName") == "Tether USD":
-                return float(token.get("balance", 0)) / 1e6  # Конвертация в USDT
-    return 0
-
-
 def get_trx_usd_rate():
     """
     Получение курса TRX/USD.
@@ -234,3 +77,264 @@ def get_trx_usd_rate():
         return response.json().get("tron", {}).get("usd", 1)
     return -1
 
+
+
+class BlockchainAPI(ABC):
+    """
+    Абстрактный класс для взаимодействия с различными блокчейнами.
+    """
+
+    @abstractmethod
+    def get_last_transactions(self, wallet_address, limit=3):
+        pass
+
+    @abstractmethod
+    def get_transaction_details(self, tx_hash):
+        pass
+
+
+class SolanaAPI(BlockchainAPI):
+    def __init__(self, rpc_url):
+        self.rpc_url = rpc_url
+
+    def get_last_transactions(self, wallet_address, limit=3):
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getSignaturesForAddress",
+            "params": [wallet_address, {"limit": limit}],
+        }
+        response = requests.post(self.rpc_url, json=payload)
+        response.raise_for_status()
+        return response.json().get("result", [])
+
+    def get_transaction_details(self, tx_hash):
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getTransaction",
+            "params": [tx_hash, "jsonParsed"],
+        }
+        response = requests.post(self.rpc_url, json=payload)
+        response.raise_for_status()
+        return response.json().get("result", {})
+
+
+class BinanceSmartChainAPI(BlockchainAPI):
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.api_url = "https://api.bscscan.com/api"
+
+    def get_last_transactions(self, wallet_address, limit=3):
+        url = f"{self.api_url}?module=account&action=txlist&address={wallet_address}&apikey={self.api_key}"
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json().get("result", [])
+
+    def get_last_token_transactions(self, wallet_address, contract_address, limit=3):
+        url = (
+            f"{self.api_url}?module=account&action=tokentx"
+            f"&contractaddress={contract_address}&address={wallet_address}"
+            f"&apikey={self.api_key}&sort=desc&page=1&offset=3"
+        )
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json().get("result", [])
+
+    def get_transaction_details(self, tx_hash):
+        return {"tx_hash": tx_hash}
+
+
+class BaseApi(BlockchainAPI):
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.api_url = "https://api.basescan.org/api"
+
+    def get_last_transactions(self, wallet_address, limit=3):
+        url = f"{self.api_url}?module=account&action=txlist&address={wallet_address}&apikey={self.api_key}"
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json().get("result", [])
+
+    def get_last_token_transactions(self, wallet_address, contract_address, limit=3):
+        url = (
+            f"{self.api_url}?module=account&action=tokentx"
+            f"&contractaddress={contract_address}&address={wallet_address}"
+            f"&apikey={self.api_key}&sort=desc&page=1&offset={limit}"
+        )
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json().get("result", [])
+
+    def get_transaction_details(self, tx_hash):
+        return {"tx_hash": tx_hash}
+
+
+class TronAPI(BlockchainAPI):
+    def __init__(self, api_key):
+        self.api_key = api_key
+
+    def get_last_transactions(self, wallet_address, limit=3):
+        url = f"https://apilist.tronscan.org/api/transaction?address={wallet_address}&limit={limit}&apikey={self.api_key}"
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json().get("data", [])
+
+    def get_last_token_transactions(self, wallet_address, contract_address, limit=3):
+        url = (
+            f"https://apilist.tronscanapi.com/api/token_trc20/transfers"
+            f"?contract_address={contract_address}"  # Адрес контракта TRC20
+            f"&relatedAddress={wallet_address}"  # Адрес кошелька
+            f"&sort=-timestamp"  # Сортировка по времени (новейшие транзакции сначала)
+            f"&limit={limit}"  # Количество транзакций на странице
+            f"&start=0"  # Начальный индекс для пагинации
+        )
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json().get("token_transfers", [])
+
+    def get_transaction_details(self, tx_hash):
+        url = f"https://apilist.tronscan.org/api/transaction-info?hash={tx_hash}"
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json()
+
+
+class TonAPI(BlockchainAPI):
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.api_url = "https://toncenter.com/api/v2"
+
+    def get_last_transactions(self, wallet_address, limit=3):
+        params = {
+            "address": wallet_address,
+            "limit": limit,
+            "api_key": self.api_key,
+        }
+        url = f"{self.api_url}/getTransactions"
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        return response.json().get("result", [])
+
+    def get_transaction_details(self, tx_hash):
+        params = {
+            "hash": tx_hash,
+            "api_key": self.api_key,
+        }
+        url = f"{self.api_url}/getTransaction"
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        return response.json().get("result", {})
+
+
+class BlockchainFactory:
+    """
+    Фабрика для создания объектов API блокчейнов.
+    """
+
+    @staticmethod
+    def get_blockchain_api(blockchain):
+        if blockchain == "SOL":
+            return SolanaAPI(rpc_url="https://api.mainnet-beta.solana.com")
+        elif blockchain == "BSC":
+            return BinanceSmartChainAPI(api_key=os.getenv("BSC_API_KEY"))
+        elif blockchain == "TRON":
+            return TronAPI(api_key=os.getenv("TRON_API_KEY"))
+        elif blockchain == "TON":
+            return TonAPI(api_key=os.getenv("TON_API_KEY"))
+        elif blockchain == "BASE":
+            return BaseApi(api_key=os.getenv("BASE_API_KEY"))
+        else:
+            raise ValueError(f"Блокчейн {blockchain} не поддерживается.")
+
+
+def is_transaction_valid(received_amount, expected_amount, tolerance=0.001):
+    """
+    Проверяет, попадает ли сумма в допустимый диапазон.
+    """
+    return abs(received_amount - expected_amount) <= (expected_amount * tolerance)
+
+
+def check_payment(blockchain, expected_amount, token_contract=None, tolerance=0.001):
+    """
+    Универсальная проверка транзакций.
+    """
+    blockchain_api = BlockchainFactory.get_blockchain_api(blockchain)
+    wallet_address = os.environ.get(f"{blockchain}_WALLET_ADDRESS")
+    if token_contract:
+        transactions = blockchain_api.get_last_token_transactions(wallet_address, token_contract)
+        for tx in transactions:
+            if blockchain == "TRON":
+                amount = float(tx.get('quant')) / 1e6
+                tx_hash = tx.get('transaction_id')
+            elif blockchain == "BSC" or blockchain == "Base":
+                amount = float(tx.get("value")) / 1e18
+                tx_hash = tx.get("hash")
+            if is_transaction_valid(amount, expected_amount, tolerance):
+                return True, tx_hash
+        return False, None
+
+    transactions = blockchain_api.get_last_transactions(wallet_address)
+    amount = 0
+    count = 10
+    tx_hash = None
+    for tx in transactions:
+        count += 1
+        # Извлечение деталей транзакции
+        if blockchain == "TON":
+            amount = float(tx.get("in_msg", {}).get("value", 0)) / 1e9  # TON -> Decimal
+            tx_hash = tx.get("transaction_id").get("hash")
+        elif blockchain == "SOL":
+            try:
+                details = blockchain_api.get_transaction_details(tx.get("signature"))
+                instructions = details.get("transaction", {}).get("message", {}).get("instructions", [])
+                for instruction in instructions:
+                    if (instruction.get("programId") == "11111111111111111111111111111111"
+                            and instruction.get("parsed", {})
+                                    .get("info", {})
+                                    .get("destination", "") == os.environ.get("SOL_WALLET_ADDRESS")):
+                        amount = float(instruction.get("parsed", {}).get("info", {}).get("lamports", 0)) / 1e9
+                        tx_hash = tx.get("signature")
+                        if count > 3:
+                            break
+            except HTTPError:
+                print("Too many requests")
+                continue
+        elif blockchain == "BSC" or blockchain == "BASE":
+            amount = float(tx.get("value", 0)) / 1e18
+            tx_hash = tx.get("hash")
+        elif blockchain == "TRON":
+            amount = float(tx.get("contractData").get("amount", 0)) / 1e6
+            tx_hash = tx.get("hash")
+
+        if is_transaction_valid(amount, expected_amount, tolerance):
+            return True, tx_hash
+
+    return False, None
+
+
+def validate_payment(transaction):
+    """
+    Проверка оплаты для переданной транзакции.
+    """
+    token_contract = None
+    if transaction.currency == "USDT" and transaction.blockchain == "BSC":
+        token_contract = os.getenv("USDT_BSC_MINT_ADDRESS")
+    elif transaction.currency == "USDT" and transaction.blockchain == "TRON":
+        token_contract = os.getenv("USDT_TRON_MINT_ADDRESS")
+    elif transaction.currency == "USDC" and transaction.blockchain == "Base":
+        token_contract = os.getenv("USDC_BASE_MINT_ADDRESS")
+
+    is_valid, tx_id = check_payment(
+        blockchain=transaction.blockchain,
+        expected_amount=transaction.expected_amount,
+        token_contract=token_contract,
+    )
+
+    if is_valid:
+        transaction.status = "Success"
+        transaction.tx_id = tx_id
+        session.commit()
+        return True
+    else:
+        return False

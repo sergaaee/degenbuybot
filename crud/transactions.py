@@ -3,7 +3,7 @@ from database import Transaction
 import random
 
 def get_transaction_by_telegram_id(session: Session, telegram_id: int) -> Transaction | None:
-    return session.query(Transaction).filter_by(initiator=telegram_id).first()
+    return session.query(Transaction).filter_by(initiator=telegram_id, status="Pending").first()
 
 def create_transaction(session, telegram_id, base_price, blockchain, currency, period, with_chat):
     """
@@ -11,7 +11,7 @@ def create_transaction(session, telegram_id, base_price, blockchain, currency, p
     """
     # Уникальная поправка: ±0.01% от base_price
     adjustment = random.uniform(-0.0001, 0.0001) * base_price
-    expected_amount = round(base_price + adjustment, 6)  # Уточняем до 6 знаков после запятой
+    expected_amount = round(base_price + adjustment, 8)  # Уточняем до 6 знаков после запятой
 
     new_transaction = Transaction(
         initiator=telegram_id,

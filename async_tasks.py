@@ -24,7 +24,7 @@ async def monitor_transactions(session, bot):
                 await bot.send_message(user.telegram_id, "Время на оплату истекло. Транзакция была отменена.")
 
             # Удаляем транзакцию
-            session.delete(transaction)
+            transaction.status = "Expired"
             session.commit()
 
         await asyncio.sleep(60)  # Проверяем каждые 60 секунд
