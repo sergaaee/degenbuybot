@@ -11,8 +11,6 @@ from aiogram import F
 from aiogram.types import CallbackQuery
 from keyboards import (
     get_main_inline_keyboard,
-    get_with_chat_inline_keyboard,
-    get_without_chat_inline_keyboard,
     get_back_to_main_menu_keyboard,
 )
 from main import bot, session

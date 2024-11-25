@@ -118,10 +118,7 @@ def calculate_expected_amount(transaction, rate_func):
         raise ValueError("Не удалось получить курс валюты.")
 
     price_in_usd = transaction.expected_amount
-    print(price_in_usd)
-    print(rate)
     price_in_currency = price_in_usd / rate
-    print(price_in_currency)
 
     expected_amount = price_in_currency
 
@@ -173,7 +170,7 @@ async def handle_payment(callback: CallbackQuery):
         await callback.message.edit_text(str(e))
         return
 
-    wallet_address = os.environ.get(f"{blockchain.upper()}_WALLET_ADDRESS")
+    wallet_address = os.environ.get(f"{blockchain}_WALLET_ADDRESS")
     update_transaction(session, transaction, blockchain, currency, expected_amount)
 
     await send_payment_instruction(
@@ -218,8 +215,18 @@ async def check_payment_callback(callback: CallbackQuery) -> None:
         # Определяем тип подписки
         subscription_type = "Без чата" if not transaction.with_chat else "С чатом"
 
+        base_time = {
+            "1m": 30,
+            "3m": 120,
+            "6m": 180,
+            "1y": 365,
+            "lt": 15000,
+        }
+
+        days = base_time.get(transaction.period, 30)
+
         # Создаем подписку
-        subscription = create_subscription(session, user_id, subscription_type)
+        subscription = create_subscription(session, user_id, subscription_type, days)
         session.commit()
 
         # Отправляем ссылку на чат, если подписка "С чатом"

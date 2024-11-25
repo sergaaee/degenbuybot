@@ -37,7 +37,7 @@ class Subscription(Base):
     __tablename__ = 'subscriptions'
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(Integer, ForeignKey('users.telegram_id'), nullable=False)
+    user_id = Column(Integer, ForeignKey('users.telegram_id'), nullable=False, unique=True)
     expiration_date = Column(DateTime, nullable=False)
     chat_id = Column(String, nullable=False)  # ID чата, куда добавляется пользователь
     muted = Column(Boolean, nullable=False, default=False)

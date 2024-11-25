@@ -242,7 +242,7 @@ class BlockchainFactory:
             return TronAPI(api_key=os.getenv("TRON_API_KEY"))
         elif blockchain == "TON":
             return TonAPI(api_key=os.getenv("TON_API_KEY"))
-        elif blockchain == "BASE":
+        elif blockchain == "Base":
             return BaseApi(api_key=os.getenv("BASE_API_KEY"))
         else:
             raise ValueError(f"Блокчейн {blockchain} не поддерживается.")

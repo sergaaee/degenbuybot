@@ -43,14 +43,28 @@ def is_user_muted(session: Session, user_id: int) -> bool:
     return subscription and subscription.chat_id == "without_chat"
 
 
-def create_subscription(session: Session, telegram_id: int, subscription_type: str) -> Subscription:
+def create_subscription(session: Session, telegram_id: int, subscription_type: str, days: int) -> Subscription:
     chat_id = "without_chat" if subscription_type == "Без чата" else "with_chat"
-    new_subscription = Subscription(
-        user_id=telegram_id,
-        expiration_date=datetime.utcnow() + timedelta(days=30),  # Пример: 30 дней
-        chat_id=chat_id,
-        muted=(subscription_type == "Без чата")
+
+    existing_subscription = (
+        session.query(Subscription)
+        .filter(Subscription.user_id == telegram_id)
+        .first()
     )
-    session.add(new_subscription)
-    session.commit()
-    return new_subscription
+
+    if existing_subscription:
+        existing_subscription.expiration_date += timedelta(days)
+        session.commit()
+        session.refresh(existing_subscription)
+        return existing_subscription
+
+    else:
+        new_subscription = Subscription(
+            user_id=telegram_id,
+            expiration_date=datetime.utcnow() + timedelta(days),
+            chat_id=chat_id,
+            muted=(subscription_type == "Без чата")
+        )
+        session.add(new_subscription)
+        session.commit()
+        return new_subscription
